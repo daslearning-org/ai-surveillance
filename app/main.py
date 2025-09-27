@@ -2,8 +2,8 @@
 import os
 os.environ['KIVY_GL_BACKEND'] = 'sdl2'
 import sys
-from threading import Thread
-import multiprocessing
+from threading import Thread, Event
+import queue
 import requests
 import time
 import datetime
@@ -69,10 +69,8 @@ class AiCctvApp(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         #Window.bind(on_keyboard=self.events)
-        manager = multiprocessing.Manager()
-        self.shared_dict = manager.dict()  # shared dictionary
-        self.loop_running = multiprocessing.Value('b', True)
         self.process = None
+        self.img_queue = queue.Queue()
 
     def build(self):
         self.theme_cls.primary_palette = "Blue"
@@ -236,6 +234,7 @@ class AiCctvApp(MDApp):
                 cam_indx = available_cameras[0] # starts the first camera if available, change as needed
             else:
                 self.show_toast_msg(f"No camera found on {platform}!", is_error=True)
+                self.cam_found = False
                 return
         try:
             self.camera = Camera(
@@ -246,76 +245,87 @@ class AiCctvApp(MDApp):
             )
             self.cam_uix.add_widget(self.camera)
             self.cam_found = True
+            self.camera.bind(texture=self.on_texture_change)
         except Exception as e:
             print(f"Error setting up the camera: {e}")
             self.show_toast_msg(f"Error setting up the camera: {e}", is_error=True)
+            self.cam_found = False
+
+    def on_texture_change(self, instance, value):
+        # Called when the texture property changes (e.g., when camera initializes)
+        print("Texture changed or initialized:", value)
+        if value:
+            # Texture is available; you can start processing frames
+            self.start_frame_processing()
+
+    def start_frame_processing(self):
+        # Schedule frame capture on the main thread
+        Clock.schedule_interval(self.process_frame, 0.033)
+
+    def process_frame(self, dt):
+        if not self.camera or not self.camera.texture:
+            return
+        try:
+            texture = self.camera.texture
+            pixels = texture.pixels
+            width, height = texture.size
+            arr = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 4))
+            #arr = np.flipud(arr)  # Flip if needed
+            img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+            # Process the frame (e.g., save or analyze)
+            self.img_queue.put(img)
+            #print("Frame captured...")
+        except Exception as e:
+            print(f"Error processing frame: {e}")
 
     def on_cam_obj_dt_leave(self):
         if self.cam_found:
             self.camera.play = False
             self.cam_uix.clear_widgets()
         if self.process:
-            self.loop_running.value = False
-            self.process.join(timeout=2)
-            if self.process.is_alive():
-                self.process.terminate()
-            self.process = None
+            self.process = False
 
     def detection_loop(self):
         """
-        This method runs a controlable contineous loop via multi process
+        This method runs a controlable contineous loop thread, it detects if there is human
         """
-        next_time = time.perf_counter() + PERIOD_SECONDS
-        while self.loop_running.value:
-            sleep_duration = next_time - time.perf_counter()
-
-            ## Kivy camera capture process
-            texture = self.camera.texture
-            # Get raw bytes (typically in 'rgba' format)
-            pixels = texture.pixels
-            width, height = texture.size
-            # Convert to numpy array (height x width x 4 for RGBA)
-            arr = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 4))
-            # Convert to BGR for OpenCV
-            img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
-
+        while self.process:
             # do the detection
-            original_height, original_width = img.shape[:2]
-            # Resize to 300x300 for model input, keep as RGB uint8
-            img_resized = cv2.resize(img, (300, 300))
-            img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
-            # Add batch dimension: shape (1, 300, 300, 3), keep uint8
-            img_data = np.expand_dims(img_resized, axis=0).astype(np.uint8)
-            # Run inference
             try:
-                results = self.sess.run(self.output_names, {self.input_name: img_data})
-                # Parse outputs
-                detection_boxes = results[0][0]  # Shape (100, 4): [y1, x1, y2, x2] normalized [0,1]
-                detection_classes = results[1][0]  # Shape (100,): class indices
-                detection_scores = results[2][0]  # Shape (100,): confidence scores
-                num_detections = results[3]  # Shape (1,): number of detections
-                # Extract num_detections as scalar
-                if num_detections.size == 1:
-                    num_detections = int(num_detections.item())
-                    # Filter detections by score threshold and draw boxes on original image
-                    threshold = 0.5
-                    for i in range(min(num_detections, len(detection_scores))):
-                        score = detection_scores[i]
-                        if score > threshold:
-                            class_id = int(detection_classes[i])
-                            if class_id == 1:
-                                print("Human found") # use a flag instead
-
-                else:
-                    print(f"Error: Unexpected num_detections shape {num_detections.shape}")
+                img = self.img_queue.get(timeout=1)
+                original_height, original_width = img.shape[:2]
+                # Resize to 300x300 for model input, keep as RGB uint8
+                img_resized = cv2.resize(img, (300, 300))
+                img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+                # Add batch dimension: shape (1, 300, 300, 3), keep uint8
+                img_data = np.expand_dims(img_resized, axis=0).astype(np.uint8)
+                # Run inference
+                try:
+                    results = self.sess.run(self.output_names, {self.input_name: img_data})
+                    # Parse outputs
+                    detection_boxes = results[0][0]  # Shape (100, 4): [y1, x1, y2, x2] normalized [0,1]
+                    detection_classes = results[1][0]  # Shape (100,): class indices
+                    detection_scores = results[2][0]  # Shape (100,): confidence scores
+                    num_detections = results[3]  # Shape (1,): number of detections
+                    # Extract num_detections as scalar
+                    if num_detections.size == 1:
+                        num_detections = int(num_detections.item())
+                        # Filter detections by score threshold and draw boxes on original image
+                        threshold = 0.5
+                        for i in range(min(num_detections, len(detection_scores))):
+                            score = detection_scores[i]
+                            if score > threshold:
+                                class_id = int(detection_classes[i])
+                                if class_id == 1:
+                                    print("Human found") # use a flag instead & break
+                    else:
+                        print(f"Error: Unexpected num_detections shape {num_detections.shape}")
+                except Exception as e:
+                    print(f"Inference error: {e}")
+            except queue.Empty:
+                continue # continue playing or simple loop through
             except Exception as e:
-                print(f"Inference error: {e}")
-            
-
-            # not to bombard the processor
-            if sleep_duration > 0:
-                time.sleep(sleep_duration)
-            next_time += PERIOD_SECONDS
+                print(f"Queue error: {e}")
 
     def start_detect_session(self):
         try:
@@ -332,16 +342,18 @@ class AiCctvApp(MDApp):
         if not self.cam_found:
             self.show_toast_msg("Camera could not be loaded!", is_error=True)
             return
-        #if self.is_downloading == "ssd_mobilenet_v1_10.onnx":
-        #    self.show_toast_msg("Please wait for the model download to finish!", is_error=True)
-        #    return
-        #if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
-        #    self.sess = False
-        #    self.popup_detect_model()
-        #    return
-        self.start_detect_session()
-        self.process = multiprocessing.Process(target=self.detection_loop)
-        self.process.start()
+        if self.is_downloading == "ssd_mobilenet_v1_10.onnx":
+            self.show_toast_msg("Please wait for the model download to finish!", is_error=True)
+            return
+        if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
+            self.sess = False
+            self.popup_detect_model()
+            return
+        if not self.sess:
+            self.start_detect_session()
+        # thread
+        self.process = True
+        Thread(target=self.detection_loop, daemon=True).start()
 
     def onnx_detect_callback(self, onnx_resp):
         status = onnx_resp["status"]
