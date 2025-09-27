@@ -62,6 +62,11 @@ MDScreen:
                 id: screen_manager
 
                 MDScreen:
+                    name: "initScreen"
+                    MDLabel:
+                        text: "Init Screen to be updated with details capture form..."
+
+                MDScreen:
                     name: "camObjDetect"
                     on_enter: app.on_cam_obj_detect()
                     on_leave: app.on_cam_obj_dt_leave()

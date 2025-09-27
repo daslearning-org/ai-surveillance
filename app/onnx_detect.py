@@ -4,6 +4,7 @@ from onnxruntime import InferenceSession
 from kivy.clock import Clock
 
 import os, sys
+import datetime
 
 # Determine the base path for your application's resources
 if getattr(sys, 'frozen', False):
@@ -41,6 +42,9 @@ class OnnxDetect():
         self.model_dir = model_dir
 
     def start_detect_session(self, model_name="ssd_mobilenet_v1.onnx"):
+        """
+        Starts the onnx session with ssd_mobilenet onnx model
+        """
         model_path = os.path.join(self.model_dir, model_name)
         download_path = os.path.join(self.model_dir, "ssd_mobilenet_v1_10.onnx")
         if os.path.exists(download_path):
@@ -76,18 +80,26 @@ class OnnxDetect():
                 print(f"Error loading model: {e}")
         return False
 
-    def run_detect(self, image_path, callback=None, caller=None):
+
+    def run_detect(self, img, callback=None, caller=None):
+        """
+        Thid functions takes a cv2 image & detects if the any human found on the image.
+        """
+        human_flag = False
         final_result = {"status": False, "message": "Initial load", "caller": caller}
         if self.sess is None:
             final_result['message'] = "Onnx session was not initialized! Check if model has been downloaded."
             return final_result
         # Load and preprocess the image
-        image_filename = image_path.split("/")[-1]
+        now = datetime.datetime.now()
+        current_time = str(now.strftime("%H%M%S"))
+        current_date = str(now.strftime("%Y%m%d"))
+        image_filename = f"cam-{current_date}-{current_time}.png"
         op_img_path = os.path.join(self.save_dir, f"op-{image_filename}")
-        img = cv2.imread(image_path)
+
         if img is None:
-            print(f"Error: Could not load image at {image_path}")
-            final_result['message'] = f"Error: Could not load image at {image_path}"
+            print("Error: Could not load image")
+            final_result['message'] = "Error: Could not load image"
             return final_result
         original_height, original_width = img.shape[:2]
 
@@ -140,10 +152,6 @@ class OnnxDetect():
             final_result['message'] = f"Error: Unexpected num_detections shape {num_detections.shape}"
             return final_result
 
-        # Prepare original image for drawing (convert to RGB then back to BGR for OpenCV)
-        output_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert original image to RGB
-        output_img = cv2.cvtColor(output_img, cv2.COLOR_RGB2BGR)  # Convert back to BGR
-
         # Filter detections by score threshold and draw boxes on original image
         threshold = 0.5
         for i in range(min(num_detections, len(detection_scores))):
@@ -151,25 +159,29 @@ class OnnxDetect():
             if score > threshold:
                 class_id = int(detection_classes[i])
                 label = coco_labels.get(class_id, 'unknown')
-                box = detection_boxes[i]
+                if label == 'person':
+                    human_flag = True
+                    box = detection_boxes[i]
+                    # Scale boxes to original image size
+                    y1 = int(box[0] * original_height)
+                    x1 = int(box[1] * original_width)
+                    y2 = int(box[2] * original_height)
+                    x2 = int(box[3] * original_width)
+                    percent = int(score*100)
+                    # Prepare original image for drawing (convert to RGB then back to BGR for OpenCV)
+                    output_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert original image to RGB
+                    output_img = cv2.cvtColor(output_img, cv2.COLOR_RGB2BGR)  # Convert back to BGR
+                    # Draw rectangle and label
+                    cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(output_img, f"{label}: {percent}%", (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, text_size, (0, 255, 0), thickness)
 
-                # Scale boxes to original image size
-                y1 = int(box[0] * original_height)
-                x1 = int(box[1] * original_width)
-                y2 = int(box[2] * original_height)
-                x2 = int(box[3] * original_width)
+        if human_flag:
+            # Save or display
+            cv2.imwrite(op_img_path, output_img)
+            final_result['status'] = True
+            final_result['message'] = op_img_path
 
-                percent = int(score*100)
-                # Draw rectangle and label
-                cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(output_img, f"{label}: {percent}%", (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, text_size, (0, 255, 0), thickness)
-
-        # Save or display
-        cv2.imwrite(op_img_path, output_img)
-        final_result['status'] = True
-        final_result['message'] = op_img_path
-
-        if callback:
+        if callback and human_flag:
             Clock.schedule_once(lambda dt: callback(final_result))
         else:
             return final_result
