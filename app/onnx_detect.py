@@ -175,6 +175,7 @@ class OnnxDetect():
                     cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(output_img, f"{label}: {percent}%", (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, text_size, (0, 255, 0), thickness)
 
+        print("checking if human found")
         if human_flag:
             # Save or display
             cv2.imwrite(op_img_path, output_img)

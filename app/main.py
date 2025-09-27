@@ -6,8 +6,10 @@ from threading import Thread
 import multiprocessing
 import requests
 import time
+import datetime
 import numpy as np
 import cv2
+from onnxruntime import InferenceSession
 
 from kivy.lang import Builder
 from kivy.properties import StringProperty, NumericProperty, ObjectProperty
@@ -31,12 +33,12 @@ Window.softinput_mode = "below_target"
 # Import your local screen classes & modules
 from screens.cam_obj_detect import CamObjDetBox
 from screens.setting import SettingsBox
-from onnx_detect import OnnxDetect
+#from onnx_detect import OnnxDetect
 
 ## Global definitions
 __version__ = "0.0.1" # The APP version
 
-FREQUENCY_HZ = 10.0 # using 10fps detection can be increated upto original camera fps
+FREQUENCY_HZ = 1.0 # using 10fps detection can be increated upto original camera fps
 PERIOD_SECONDS = 1.0 / FREQUENCY_HZ
 
 detect_model_url = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/ssd-mobilenetv1/model/ssd_mobilenet_v1_10.onnx"
@@ -59,10 +61,10 @@ class ContentNavigationDrawer(MDNavigationDrawerMenu):
 class AiCctvApp(MDApp):
     is_downloading = ObjectProperty(None)
     onnx_detect = ObjectProperty(None)
-    onnx_detect_sess = ObjectProperty(None)
     cam_found = ObjectProperty(None)
     camera = ObjectProperty(None)
     detect_model_path = StringProperty("")
+    sess = ObjectProperty(None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -116,12 +118,6 @@ class AiCctvApp(MDApp):
 
         if not os.path.exists(self.detect_model_path):
             self.popup_detect_model()
-
-        # create onnx objects
-        self.onnx_detect = OnnxDetect(
-            save_dir=self.op_dir,
-            model_dir=self.model_dir,
-        )
         print("Initialisation is successfull")
 
     def show_toast_msg(self, message, is_error=False):
@@ -283,29 +279,67 @@ class AiCctvApp(MDApp):
             # Convert to BGR for OpenCV
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
 
-            # send it to detect with callback
-            onnx_thread = Thread(target=self.onnx_detect.run_detect, args=(img, self.onnx_detect_callback, "camObjDetect"), daemon=True)
-            onnx_thread.start()
+            # do the detection
+            original_height, original_width = img.shape[:2]
+            # Resize to 300x300 for model input, keep as RGB uint8
+            img_resized = cv2.resize(img, (300, 300))
+            img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+            # Add batch dimension: shape (1, 300, 300, 3), keep uint8
+            img_data = np.expand_dims(img_resized, axis=0).astype(np.uint8)
+            # Run inference
+            try:
+                results = self.sess.run(self.output_names, {self.input_name: img_data})
+                # Parse outputs
+                detection_boxes = results[0][0]  # Shape (100, 4): [y1, x1, y2, x2] normalized [0,1]
+                detection_classes = results[1][0]  # Shape (100,): class indices
+                detection_scores = results[2][0]  # Shape (100,): confidence scores
+                num_detections = results[3]  # Shape (1,): number of detections
+                # Extract num_detections as scalar
+                if num_detections.size == 1:
+                    num_detections = int(num_detections.item())
+                    # Filter detections by score threshold and draw boxes on original image
+                    threshold = 0.5
+                    for i in range(min(num_detections, len(detection_scores))):
+                        score = detection_scores[i]
+                        if score > threshold:
+                            class_id = int(detection_classes[i])
+                            if class_id == 1:
+                                print("Human found") # use a flag instead
+
+                else:
+                    print(f"Error: Unexpected num_detections shape {num_detections.shape}")
+            except Exception as e:
+                print(f"Inference error: {e}")
+            
 
             # not to bombard the processor
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
             next_time += PERIOD_SECONDS
 
+    def start_detect_session(self):
+        try:
+            self.sess = InferenceSession(self.detect_model_path)
+            # Get input and output names
+            self.input_name = self.sess.get_inputs()[0].name
+            self.output_names = [o.name for o in self.sess.get_outputs()]
+            return True
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            return False
+
     def capture_n_onnx_detect(self):
         if not self.cam_found:
             self.show_toast_msg("Camera could not be loaded!", is_error=True)
             return
-        if self.is_downloading == "ssd_mobilenet_v1_10.onnx":
-            self.show_toast_msg("Please wait for the model download to finish!", is_error=True)
-            return
-        if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
-            self.onnx_detect_sess = False
-            self.popup_detect_model()
-            return
-        if not self.onnx_detect_sess:
-            self.onnx_detect_sess = self.onnx_detect.start_detect_session()
-            self.capture_n_onnx_detect()
+        #if self.is_downloading == "ssd_mobilenet_v1_10.onnx":
+        #    self.show_toast_msg("Please wait for the model download to finish!", is_error=True)
+        #    return
+        #if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
+        #    self.sess = False
+        #    self.popup_detect_model()
+        #    return
+        self.start_detect_session()
         self.process = multiprocessing.Process(target=self.detection_loop)
         self.process.start()
 
@@ -315,7 +349,6 @@ class AiCctvApp(MDApp):
         caller = onnx_resp["caller"]
         self.is_detect_running = False
         result_box = self.root.ids.cam_detect_box.ids.cam_result_image
-
         if status is True:
             self.show_toast_msg(f"Output generated at: {message}")
             self.op_img_path = message
@@ -336,3 +369,6 @@ class AiCctvApp(MDApp):
             result_box.add_widget(down_btn)
         else:
             self.show_toast_msg(message, is_error=True)
+
+if __name__ == '__main__':
+    AiCctvApp().run()
