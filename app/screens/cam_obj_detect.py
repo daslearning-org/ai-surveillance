@@ -45,7 +45,7 @@ Builder.load_string('''
             md_bg_color: '#333036'
             pos_hint: {"center_x": .5, "center_y": .5}
             size_hint_x: 0.3
-            on_release: app.reset_cam_object_detect()
+            on_release: app.stop_cctv_loop()
 
     BoxLayout: # converted image
         size_hint_y: 0.5

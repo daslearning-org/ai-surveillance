@@ -76,6 +76,7 @@ class AiCctvApp(MDApp):
         super().__init__(**kwargs)
         #Window.bind(on_keyboard=self.events)
         self.process = None
+        self.is_loop_started = False
         self.img_queue = queue.Queue()
         self.sms_queue = queue.Queue()
 
@@ -132,9 +133,6 @@ class AiCctvApp(MDApp):
             if len(self.config_data.get('phone', 'na')) >= 5:
                 self.root.ids.screen_manager.current = "camObjDetect"
 
-        # to be moved under on_screen only
-        if not os.path.exists(self.detect_model_path):
-            self.popup_detect_model()
         print("Initialisation is successfull")
 
     def show_toast_msg(self, message, is_error=False):
@@ -307,10 +305,10 @@ class AiCctvApp(MDApp):
 
     def start_frame_processing(self):
         # Schedule frame capture on the main thread
-        Clock.schedule_interval(self.process_frame, 0.1)
+        Clock.schedule_interval(self.process_frame, 0.2)
 
     def process_frame(self, dt):
-        if not self.camera or not self.camera.texture:
+        if not self.camera or not self.camera.texture or not self.process:
             return
         try:
             texture = self.camera.texture
@@ -321,13 +319,16 @@ class AiCctvApp(MDApp):
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
             # Process the frame (e.g., save or analyze)
             self.img_queue.put(img)
-            #print(f"Frame captured")
+            print(f"Frame captured") # debug
         except Exception as e:
             print(f"Error processing frame: {e}")
 
     def on_cam_obj_dt_leave(self):
         if self.cam_found:
-            self.camera.play = False
+            try:
+                self.camera.play = False
+            except Exception as e:
+                print(f"Cam stop error: {e}")
             self.cam_uix.clear_widgets()
             self.camera = False
         if self.process:
@@ -342,6 +343,7 @@ class AiCctvApp(MDApp):
             try:
                 sms_manager.sendTextMessage(phone, None, msg, None, None)
                 print(f"✅ SMS sent to {phone}")
+                self.show_toast_msg(f"✅ SMS sent to {phone}")
                 self.sms_send_count += 1
             except Exception as e:
                 print("SMS ❌ Failed:", e)
@@ -356,8 +358,9 @@ class AiCctvApp(MDApp):
         while self.process:
             detect_flag = False
             try:
-                img_path = self.sms_queue.get(timeout=0.1)
-                print(f"Detected: {img_path}")
+                img_path = self.sms_queue.get(timeout=0.2)
+                print(f"Detected: {img_path}") # debug
+                Thread(target=self.send_sms, args=(img_path), daemon=True).start()
             except queue.Empty:
                 continue # continue playing or simple loop through
             except Exception as e:
@@ -377,7 +380,8 @@ class AiCctvApp(MDApp):
             op_img_path = os.path.join(self.op_dir, image_filename)
             # do the detection
             try:
-                img = self.img_queue.get(timeout=0.1)
+                img = self.img_queue.get(timeout=0.2)
+                print("In detection loop") # debug
                 original_height, original_width = img.shape[:2]
                 # Resize to 300x300 for model input, keep as RGB uint8
                 img_resized = cv2.resize(img, (300, 300))
@@ -438,12 +442,16 @@ class AiCctvApp(MDApp):
             # Get input and output names
             self.input_name = self.sess.get_inputs()[0].name
             self.output_names = [o.name for o in self.sess.get_outputs()]
+            print("Onnx session started")
             return True
         except Exception as e:
             print(f"Error loading model: {e}")
             return False
 
     def capture_n_onnx_detect(self):
+        if self.process:
+            self.show_toast_msg("Capture session is already started!")
+            return
         if not self.cam_found:
             self.show_toast_msg("Camera could not be loaded!", is_error=True)
             return
@@ -454,12 +462,15 @@ class AiCctvApp(MDApp):
             self.sess = False
             self.popup_detect_model()
             return
-        if not self.sess:
-            self.start_detect_session()
+        start_process = self.start_detect_session()
         # thread
-        self.process = True
-        Thread(target=self.detection_loop, daemon=True).start()
-        Thread(target=self.sms_loop, daemon=True).start()
+        if start_process and not self.process:
+            self.process = True
+            Thread(target=self.detection_loop, daemon=True).start()
+            Thread(target=self.sms_loop, daemon=True).start()
+
+    def stop_cctv_loop(self):
+        self.process = False
 
     def onnx_detect_callback(self, onnx_resp):
         status = onnx_resp["status"]
@@ -503,10 +514,79 @@ class AiCctvApp(MDApp):
             json.dump(self.config_data, f, indent=4)
         self.root.ids.screen_manager.current = "camObjDetect"
 
+    def open_link(self, instance, url):
+        import webbrowser
+        webbrowser.open(url)
+
+    def update_link_open(self, instance):
+        self.txt_dialog_closer(instance)
+        self.open_link(instance=instance, url="https://github.com/daslearning-org/ai-surveillance/releases")
+
+    def update_checker(self, instance):
+        buttons = [
+            MDFlatButton(
+                text="Cancel",
+                theme_text_color="Custom",
+                text_color=self.theme_cls.primary_color,
+                on_release=self.txt_dialog_closer
+            ),
+            MDFlatButton(
+                text="Releases",
+                theme_text_color="Custom",
+                text_color="green",
+                on_release=self.update_link_open
+            ),
+        ]
+        self.show_text_dialog(
+            "Check for update",
+            f"Your version: {__version__}",
+            buttons
+        )
+
+    def show_delete_alert(self):
+        op_img_count = 0
+        for filename in os.listdir(self.op_dir):
+            if filename.endswith(".jpg") or filename.endswith(".jpeg") or filename.endswith(".png"):
+                op_img_count += 1
+        self.show_text_dialog(
+            title="Delete all output files?",
+            text=f"There are total: {op_img_count} image files. This action cannot be undone!",
+            buttons=[
+                MDFlatButton(
+                    text="CANCEL",
+                    theme_text_color="Custom",
+                    text_color=self.theme_cls.primary_color,
+                    on_release=self.txt_dialog_closer
+                ),
+                MDFlatButton(
+                    text="DELETE",
+                    theme_text_color="Custom",
+                    text_color="red",
+                    on_release=self.delete_op_action
+                ),
+            ],
+        )
+
+    def delete_op_action(self, instance):
+        # Custom function called when DISCARD is clicked
+        for filename in os.listdir(self.op_dir):
+            if filename.endswith(".jpg") or filename.endswith(".jpeg") or filename.endswith(".png"):
+                file_path = os.path.join(self.op_dir, filename)
+                try:
+                    os.unlink(file_path)
+                    print(f"Deleted {file_path}")
+                except Exception as e:
+                    print(f"Could not delete the audion files, error: {e}")
+        self.show_toast_msg("Executed the audio cleanup!")
+        self.txt_dialog_closer(instance)
+
     ## run on app exit
     def on_stop(self):
         self.process = False
-        self.camera.play = False
+        try:
+            self.camera.play = False
+        except Exception as e:
+            print(f"Cam stop error: {e}")
         self.camera = False
 
 if __name__ == '__main__':
