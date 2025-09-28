@@ -22,6 +22,9 @@ from kivy.uix.image import Image
 from kivy.uix.camera import Camera
 from kivy.clock import Clock
 
+if platform == "android":
+    from jnius import autoclass
+
 from kivymd.app import MDApp
 from kivymd.uix.navigationdrawer import MDNavigationDrawerMenu
 from kivymd.uix.filemanager import MDFileManager
@@ -67,6 +70,7 @@ class AiCctvApp(MDApp):
     sess = ObjectProperty(None)
     last_detect_time = ObjectProperty()
     config_data = ObjectProperty()
+    sms_send_count = NumericProperty(0)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -84,7 +88,6 @@ class AiCctvApp(MDApp):
         # paths setup
         if platform == "android":
             from android.permissions import request_permissions, Permission
-            from jnius import autoclass, PythonJavaClass, java_method
             sdk_version = 28
             try:
                 VERSION = autoclass('android.os.Build$VERSION')
@@ -120,6 +123,7 @@ class AiCctvApp(MDApp):
         os.makedirs(config_dir, exist_ok=True)
         self.config_path = os.path.join(config_dir, 'config.json')
         self.detect_model_path = os.path.join(self.model_dir, "ssd_mobilenet_v1_10.onnx")
+        Window.keep_screen_on = True
 
         # check if config exists with a valid phone number
         if os.path.exists(self.config_path):
@@ -317,7 +321,7 @@ class AiCctvApp(MDApp):
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
             # Process the frame (e.g., save or analyze)
             self.img_queue.put(img)
-            print(f"Frame captured: {dt}")
+            #print(f"Frame captured")
         except Exception as e:
             print(f"Error processing frame: {e}")
 
@@ -325,8 +329,25 @@ class AiCctvApp(MDApp):
         if self.cam_found:
             self.camera.play = False
             self.cam_uix.clear_widgets()
+            self.camera = False
         if self.process:
             self.process = False
+
+    def send_sms(self, img_path):
+        if platform == "android" and self.sms_send_count< 2: # currently sending only for two times per session
+            SmsManager = autoclass('android.telephony.SmsManager')
+            sms_manager = SmsManager.getDefault()
+            msg = f"Human detected: {img_path}"
+            phone = self.config_data['phone']
+            try:
+                sms_manager.sendTextMessage(phone, None, msg, None, None)
+                print(f"✅ SMS sent to {phone}")
+                self.sms_send_count += 1
+            except Exception as e:
+                print("SMS ❌ Failed:", e)
+                self.show_toast_msg(f"sms failed: {e}", is_error=True)
+        else:
+            print("This works only on Android!")
 
     def sms_loop(self):
         """
@@ -396,10 +417,10 @@ class AiCctvApp(MDApp):
                                     cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
                                     cv2.putText(output_img, f"person: {percent}%", (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1)
                         if detect_flag:
-                            cv2.imwrite(op_img_path, output_img)
                             detect_count += 1
                         if detect_count >= 5:
                             # if detection happens for atleast 5 framse i.e. 1/2 sec
+                            cv2.imwrite(op_img_path, output_img)
                             self.sms_queue.put(op_img_path)
                             detect_count = 0
                     else:
@@ -485,6 +506,8 @@ class AiCctvApp(MDApp):
     ## run on app exit
     def on_stop(self):
         self.process = False
+        self.camera.play = False
+        self.camera = False
 
 if __name__ == '__main__':
     AiCctvApp().run()
