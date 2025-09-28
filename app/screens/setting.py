@@ -1,6 +1,5 @@
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.screen import MDScreen
 from kivymd.uix.list import MDList, OneLineIconListItem, IconLeftWidget, IconRightWidget, OneLineAvatarIconListItem
 
 from kivy.uix.accordion import Accordion, AccordionItem
@@ -22,7 +21,7 @@ Builder.load_string('''
             spacing: dp(8)
             canvas.before:
                 Color:
-                    rgba: 168, 183, 191, 1
+                    rgba: (168, 183, 191, 1)
                 RoundedRectangle:
                     size: self.width, self.height
                     pos: self.pos
@@ -34,23 +33,18 @@ Builder.load_string('''
                         on_release: app.show_delete_alert()
                         IconLeftWidget:
                             icon: "broom"
-                    OneLineAvatarIconListItem:
-                        text: "Preview in Image Selection!"
+                    OneLineIconListItem:
+                        text: "Change target SMS number"
+                        on_release: app.change_sms_number()
                         IconLeftWidget:
-                            icon: "image"
-                        IconRightWidget:
-                            id: img_preview_switch
-                            icon: "toggle-switch-off"
-                            on_release: app.img_preview_on()
-                            theme_text_color: "Custom"
-                            text_color: "gray"
+                            icon: "phone"
 
         AccordionItem:
             title: "Help & Support"
             spacing: dp(8)
             canvas.before:
                 Color:
-                    rgba: 170, 191, 184, 1
+                    rgba: (170, 191, 184, 1)
                 RoundedRectangle:
                     size: self.width, self.height
                     pos: self.pos
@@ -64,7 +58,7 @@ Builder.load_string('''
                             icon: "youtube"
                     OneLineIconListItem:
                         text: "Documentation (Blog)"
-                        on_release: app.open_link(self, "https://blog.daslearning.in/llm_ai/ml/ai-vision.html")
+                        on_release: app.open_link(self, "https://blog.daslearning.in/llm_ai/ml/ai-cctv.html")
                         IconLeftWidget:
                             icon: "file-document-check"
                     OneLineIconListItem:

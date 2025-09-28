@@ -2,11 +2,13 @@
 import os
 os.environ['KIVY_GL_BACKEND'] = 'sdl2'
 import sys
-from threading import Thread, Event
+from threading import Thread
 import queue
 import requests
 import time
 import datetime
+import json
+
 import numpy as np
 import cv2
 from onnxruntime import InferenceSession
@@ -33,13 +35,10 @@ Window.softinput_mode = "below_target"
 # Import your local screen classes & modules
 from screens.cam_obj_detect import CamObjDetBox
 from screens.setting import SettingsBox
-#from onnx_detect import OnnxDetect
+from screens.init_screen import ConfigInput
 
 ## Global definitions
 __version__ = "0.0.1" # The APP version
-
-FREQUENCY_HZ = 1.0 # using 10fps detection can be increated upto original camera fps
-PERIOD_SECONDS = 1.0 / FREQUENCY_HZ
 
 detect_model_url = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/ssd-mobilenetv1/model/ssd_mobilenet_v1_10.onnx"
 # Determine the base path for your application's resources
@@ -50,6 +49,7 @@ else:
     # Running in a normal Python environment
     base_path = os.path.dirname(os.path.abspath(__file__))
 kv_file_path = os.path.join(base_path, 'main_layout.kv')
+
 
 ## define custom kivymd classes
 class ContentNavigationDrawer(MDNavigationDrawerMenu):
@@ -65,12 +65,15 @@ class AiCctvApp(MDApp):
     camera = ObjectProperty(None)
     detect_model_path = StringProperty("")
     sess = ObjectProperty(None)
+    last_detect_time = ObjectProperty()
+    config_data = ObjectProperty()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         #Window.bind(on_keyboard=self.events)
         self.process = None
         self.img_queue = queue.Queue()
+        self.sms_queue = queue.Queue()
 
     def build(self):
         self.theme_cls.primary_palette = "Blue"
@@ -89,16 +92,17 @@ class AiCctvApp(MDApp):
                 print(f"Android SDK: {sdk_version}")
             except Exception as e:
                 print(f"Could not check the android SDK version: {e}")
-            permissions = [Permission.CAMERA]
+            permissions = [Permission.CAMERA, Permission.SEND_SMS, Permission.WAKE_LOCK]
             if sdk_version >= 33:  # Android 13+
                 permissions.append(Permission.READ_MEDIA_IMAGES)
-            else:  # Android 10–12
+            else:  # Android 9–12
                 permissions.extend([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
             request_permissions(permissions)
             context = autoclass('org.kivy.android.PythonActivity').mActivity
             android_path = context.getExternalFilesDir(None).getAbsolutePath()
             self.model_dir = os.path.join(android_path, 'model_files')
             self.op_dir = os.path.join(android_path, 'outputs')
+            config_dir = os.path.join(android_path, 'config')
             self.internal_storage = android_path
             try:
                 Environment = autoclass("android.os.Environment")
@@ -109,11 +113,22 @@ class AiCctvApp(MDApp):
             self.internal_storage = os.path.expanduser("~")
             self.external_storage = os.path.expanduser("~")
             self.model_dir = os.path.join(self.user_data_dir, 'model_files')
+            config_dir = os.path.join(self.user_data_dir, 'config')
             self.op_dir = os.path.join(self.user_data_dir, 'outputs')
         os.makedirs(self.model_dir, exist_ok=True)
         os.makedirs(self.op_dir, exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True)
+        self.config_path = os.path.join(config_dir, 'config.json')
         self.detect_model_path = os.path.join(self.model_dir, "ssd_mobilenet_v1_10.onnx")
 
+        # check if config exists with a valid phone number
+        if os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                self.config_data = json.load(f)
+            if len(self.config_data.get('phone', 'na')) >= 5:
+                self.root.ids.screen_manager.current = "camObjDetect"
+
+        # to be moved under on_screen only
         if not os.path.exists(self.detect_model_path):
             self.popup_detect_model()
         print("Initialisation is successfull")
@@ -143,6 +158,20 @@ class AiCctvApp(MDApp):
     def txt_dialog_closer(self, instance):
         if self.txt_dialog:
             self.txt_dialog.dismiss()
+
+    def show_custom_dialog(self, title, custom_class, buttons=[]):
+        self.custom_dialog = MDDialog(
+            title=title,
+            type="custom",
+            content_cls=custom_class,
+            buttons=buttons
+        )
+        self.custom_dialog.open()
+        print((self.custom_dialog.children))
+
+    def custom_dialog_closer(self, instance):
+        if self.custom_dialog:
+            self.custom_dialog.dismiss()
 
     def popup_detect_model(self):
         buttons = [
@@ -213,9 +242,23 @@ class AiCctvApp(MDApp):
             self.download_progress.text = f"Progress: {downloaded} bytes"
 
     def on_cam_obj_detect(self):
+        # check if config exists with a valid phone number
+        if os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                self.config_data = json.load(f)
+            if len(self.config_data.get('phone', 'na')) >= 5:
+                self.root.ids.screen_manager.current = "camObjDetect"
+            else:
+                self.change_sms_number()
+        else:
+            self.change_sms_number()
+
+        # check if the models exists
         if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
             self.popup_detect_model()
         self.show_toast_msg("Start your AI powered CCTV on phone!")
+
+        # set the Camera widget
         self.cam_uix = self.root.ids.cam_detect_box.ids.capture_image
         self.cam_uix.clear_widgets()
         if platform == "android":
@@ -260,7 +303,7 @@ class AiCctvApp(MDApp):
 
     def start_frame_processing(self):
         # Schedule frame capture on the main thread
-        Clock.schedule_interval(self.process_frame, 0.033)
+        Clock.schedule_interval(self.process_frame, 0.1)
 
     def process_frame(self, dt):
         if not self.camera or not self.camera.texture:
@@ -274,7 +317,7 @@ class AiCctvApp(MDApp):
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
             # Process the frame (e.g., save or analyze)
             self.img_queue.put(img)
-            #print("Frame captured...")
+            print(f"Frame captured: {dt}")
         except Exception as e:
             print(f"Error processing frame: {e}")
 
@@ -285,14 +328,35 @@ class AiCctvApp(MDApp):
         if self.process:
             self.process = False
 
-    def detection_loop(self):
+    def sms_loop(self):
         """
         This method runs a controlable contineous loop thread, it detects if there is human
         """
         while self.process:
+            detect_flag = False
+            try:
+                img_path = self.sms_queue.get(timeout=0.1)
+                print(f"Detected: {img_path}")
+            except queue.Empty:
+                continue # continue playing or simple loop through
+            except Exception as e:
+                print(f"SMS Queue error: {e}")
+
+    def detection_loop(self):
+        """
+        This method runs a controlable contineous loop thread, it detects if there is human
+        """
+        detect_count = 0
+        while self.process:
+            detect_flag = False
+            now = datetime.datetime.now()
+            current_time = str(now.strftime("%H%M%S"))
+            current_date = str(now.strftime("%Y%m%d"))
+            image_filename = f"cam-{current_date}-{current_time}.png"
+            op_img_path = os.path.join(self.op_dir, image_filename)
             # do the detection
             try:
-                img = self.img_queue.get(timeout=1)
+                img = self.img_queue.get(timeout=0.1)
                 original_height, original_width = img.shape[:2]
                 # Resize to 300x300 for model input, keep as RGB uint8
                 img_resized = cv2.resize(img, (300, 300))
@@ -317,7 +381,27 @@ class AiCctvApp(MDApp):
                             if score > threshold:
                                 class_id = int(detection_classes[i])
                                 if class_id == 1:
-                                    print("Human found") # use a flag instead & break
+                                    detect_flag = True
+                                    box = detection_boxes[i]
+                                    # Scale boxes to original image size
+                                    y1 = int(box[0] * original_height)
+                                    x1 = int(box[1] * original_width)
+                                    y2 = int(box[2] * original_height)
+                                    x2 = int(box[3] * original_width)
+                                    percent = int(score*100)
+                                    # Prepare original image for drawing (convert to RGB then back to BGR for OpenCV)
+                                    output_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert original image to RGB
+                                    output_img = cv2.cvtColor(output_img, cv2.COLOR_RGB2BGR)  # Convert back to BGR
+                                    # Draw rectangle and label
+                                    cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                                    cv2.putText(output_img, f"person: {percent}%", (x1, y1 - 7), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1)
+                        if detect_flag:
+                            cv2.imwrite(op_img_path, output_img)
+                            detect_count += 1
+                        if detect_count >= 5:
+                            # if detection happens for atleast 5 framse i.e. 1/2 sec
+                            self.sms_queue.put(op_img_path)
+                            detect_count = 0
                     else:
                         print(f"Error: Unexpected num_detections shape {num_detections.shape}")
                 except Exception as e:
@@ -325,7 +409,7 @@ class AiCctvApp(MDApp):
             except queue.Empty:
                 continue # continue playing or simple loop through
             except Exception as e:
-                print(f"Queue error: {e}")
+                print(f"Detect Queue error: {e}")
 
     def start_detect_session(self):
         try:
@@ -354,6 +438,7 @@ class AiCctvApp(MDApp):
         # thread
         self.process = True
         Thread(target=self.detection_loop, daemon=True).start()
+        Thread(target=self.sms_loop, daemon=True).start()
 
     def onnx_detect_callback(self, onnx_resp):
         status = onnx_resp["status"]
@@ -381,6 +466,25 @@ class AiCctvApp(MDApp):
             result_box.add_widget(down_btn)
         else:
             self.show_toast_msg(message, is_error=True)
+
+    ## Settings section
+    def change_sms_number(self):
+        self.root.ids.screen_manager.current = "initScreen"
+
+    def save_config(self, instance, input_widget):
+        phone_num = input_widget.text.strip()
+        if len(phone_num) <= 4:
+            self.show_toast_msg("Phone number should be 5 digits or more!", is_error=True)
+            self.change_sms_number()
+            return
+        self.config_data = {'phone': phone_num}
+        with open(self.config_path, 'w') as f:
+            json.dump(self.config_data, f, indent=4)
+        self.root.ids.screen_manager.current = "camObjDetect"
+
+    ## run on app exit
+    def on_stop(self):
+        self.process = False
 
 if __name__ == '__main__':
     AiCctvApp().run()
