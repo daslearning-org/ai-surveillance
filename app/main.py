@@ -319,7 +319,7 @@ class AiCctvApp(MDApp):
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
             # Process the frame (e.g., save or analyze)
             self.img_queue.put(img)
-            print(f"Frame captured") # debug
+            #print(f"Frame captured") # debug
         except Exception as e:
             print(f"Error processing frame: {e}")
 
@@ -335,7 +335,8 @@ class AiCctvApp(MDApp):
             self.process = False
 
     def send_sms(self, img_path):
-        if platform == "android" and self.sms_send_count< 2: # currently sending only for two times per session
+        if platform == "android" and self.sms_send_count< 2:
+            # currently sending only for two times per session, will change it to some time basis interval
             SmsManager = autoclass('android.telephony.SmsManager')
             sms_manager = SmsManager.getDefault()
             msg = f"Human detected: {img_path}"
@@ -359,8 +360,9 @@ class AiCctvApp(MDApp):
             detect_flag = False
             try:
                 img_path = self.sms_queue.get(timeout=0.2)
+                img_path = str(img_path)
                 print(f"Detected: {img_path}") # debug
-                Thread(target=self.send_sms, args=(img_path), daemon=True).start()
+                Thread(target=self.send_sms, args=(img_path,), daemon=True).start()
             except queue.Empty:
                 continue # continue playing or simple loop through
             except Exception as e:
@@ -381,7 +383,7 @@ class AiCctvApp(MDApp):
             # do the detection
             try:
                 img = self.img_queue.get(timeout=0.2)
-                print("In detection loop") # debug
+                #print("In detection loop") # debug
                 original_height, original_width = img.shape[:2]
                 # Resize to 300x300 for model input, keep as RGB uint8
                 img_resized = cv2.resize(img, (300, 300))
