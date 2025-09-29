@@ -30,7 +30,7 @@
 
     DrawerClickableItem:
         icon: "camera"
-        text: "Camera Object Detection"
+        text: "Start CCTV"
         on_press:
             root.nav_drawer.set_state("close")
             root.screen_manager.current = "camObjDetect"
@@ -52,7 +52,7 @@ MDScreen:
         MDTopAppBar:
             pos_hint: {"top": 1}
             elevation: 4
-            title: "Vision AI"
+            title: "AI CCTV"
             left_action_items: [["menu", lambda x: nav_drawer.set_state("open")]]
             md_bg_color: '#7643a8'
 

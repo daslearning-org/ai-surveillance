@@ -47,10 +47,14 @@ Builder.load_string('''
             size_hint_x: 0.3
             on_release: app.stop_cctv_loop()
 
-    BoxLayout: # converted image
+    BoxLayout:
         size_hint_y: 0.5
-        id: cam_result_image
-        # add result here
+        id: cam_result_box
+        MDLabel:
+            id: result_text
+            halign: "center"
+            markup: True
+            text: "You can start the CCTV"
 
 
 ''')

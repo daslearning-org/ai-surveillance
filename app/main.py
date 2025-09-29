@@ -68,15 +68,14 @@ class AiCctvApp(MDApp):
     camera = ObjectProperty(None)
     detect_model_path = StringProperty("")
     sess = ObjectProperty(None)
-    last_detect_time = ObjectProperty()
-    config_data = ObjectProperty()
-    sms_send_count = NumericProperty(0)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         #Window.bind(on_keyboard=self.events)
         self.process = None
-        self.is_loop_started = False
+        self.sms_send_count = 0
+        self.last_sms_time = 0
+        self.config_data = {'phone': 'na', 'freq': 10}
         self.img_queue = queue.Queue()
         self.sms_queue = queue.Queue()
 
@@ -132,7 +131,7 @@ class AiCctvApp(MDApp):
                 self.config_data = json.load(f)
             if len(self.config_data.get('phone', 'na')) >= 5:
                 self.root.ids.screen_manager.current = "camObjDetect"
-
+        self.result_txt = self.root.ids.cam_detect_box.ids.result_text
         print("Initialisation is successfull")
 
     def show_toast_msg(self, message, is_error=False):
@@ -196,6 +195,9 @@ class AiCctvApp(MDApp):
             buttons
         )
 
+    def result_updater(self, text):
+        self.result_txt.text = text
+
     def download_detect_model(self, instance):
         self.download_model_file(detect_model_url, self.detect_model_path, instance)
 
@@ -203,13 +205,7 @@ class AiCctvApp(MDApp):
         self.txt_dialog_closer(instance)
         filename = download_path.split("/")[-1]
         print(f"Starting the download for: {filename}")
-        result_box = self.root.ids.cam_detect_box.ids.cam_result_image
-        result_box.clear_widgets()
-        self.download_progress = MDLabel(
-            text="Progress: 0%",
-            halign="center"
-        )
-        result_box.add_widget(self.download_progress)
+        self.result_txt.text="Progress: 0%"
         Thread(target=self.download_file, args=(model_url, download_path), daemon=True).start()
 
     def download_file(self, download_url, download_path):
@@ -227,6 +223,7 @@ class AiCctvApp(MDApp):
                             downloaded += len(chunk)
                             Clock.schedule_once(lambda dt: self.update_download_progress(downloaded, total_size))
             if os.path.exists(download_path):
+                Clock.schedule_once(lambda dt: self.result_updater(f"Download complete & you can start the CCTV"))
                 Clock.schedule_once(lambda dt: self.show_toast_msg(f"Download complete: {download_path}"))
             else:
                 Clock.schedule_once(lambda dt: self.show_toast_msg(f"Download failed for: {download_path}", is_error=True))
@@ -239,16 +236,18 @@ class AiCctvApp(MDApp):
     def update_download_progress(self, downloaded, total_size):
         if total_size > 0:
             percentage = (downloaded / total_size) * 100
-            self.download_progress.text = f"Progress: {percentage:.1f}%"
+            self.result_txt.text = f"Downloading: {percentage:.1f}%"
         else:
-            self.download_progress.text = f"Progress: {downloaded} bytes"
+            self.result_txt.text = f"Downloading: {downloaded} bytes"
 
     def on_cam_obj_detect(self):
-        # check if config exists with a valid phone number
+        """
+        Started when we change the screen to `CCTV` screen from menu bar
+        """
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
                 self.config_data = json.load(f)
-            if len(self.config_data.get('phone', 'na')) >= 5:
+            if len(self.config_data.get('phone', '00000')) >= 5:
                 self.root.ids.screen_manager.current = "camObjDetect"
             else:
                 self.change_sms_number()
@@ -257,8 +256,9 @@ class AiCctvApp(MDApp):
 
         # check if the models exists
         if not os.path.exists(self.detect_model_path) and self.is_downloading != "ssd_mobilenet_v1_10.onnx":
+            self.result_updater("You need to download the model file first!")
             self.popup_detect_model()
-        self.show_toast_msg("Start your AI powered CCTV on phone!")
+        self.show_toast_msg("Start your local AI powered CCTV on phone!")
 
         # set the Camera widget
         self.cam_uix = self.root.ids.cam_detect_box.ids.capture_image
@@ -297,17 +297,24 @@ class AiCctvApp(MDApp):
             self.cam_found = False
 
     def on_texture_change(self, instance, value):
-        # Called when the texture property changes (e.g., when camera initializes)
+        """
+        Called when the texture property changes i.e. when camera is initialized
+        """
         print("Texture changed or initialized:", value)
         if value:
             # Texture is available; you can start processing frames
             self.start_frame_processing()
 
     def start_frame_processing(self):
-        # Schedule frame capture on the main thread
-        Clock.schedule_interval(self.process_frame, 0.2)
+        """
+        Schedule frame capture in loop with a configurable frequency
+        """
+        Clock.schedule_interval(self.process_frame, 0.2) # 1/5 th of a second
 
     def process_frame(self, dt):
+        """
+        Called from the camera texture with the set frequency & this captures the frame & puts into the detection `Queue`
+        """
         if not self.camera or not self.camera.texture or not self.process:
             return
         try:
@@ -315,7 +322,8 @@ class AiCctvApp(MDApp):
             pixels = texture.pixels
             width, height = texture.size
             arr = np.frombuffer(pixels, dtype=np.uint8).reshape((height, width, 4))
-            #arr = np.flipud(arr)  # Flip if needed
+            if platform == 'android':
+                arr = np.flipud(arr)  # Flip up down in android
             img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
             # Process the frame (e.g., save or analyze)
             self.img_queue.put(img)
@@ -335,26 +343,34 @@ class AiCctvApp(MDApp):
             self.process = False
 
     def send_sms(self, img_path):
-        if platform == "android" and self.sms_send_count< 2:
+        """
+        Sends the sms on `Android` only.
+        This will also update the UI section with every detection.
+        """
+        freq = self.config_data.get('freq', 10)
+        freq = freq * 60 # number of seconds to avoid sms sending
+        img_name = img_path.split("/")[-1]
+        msg = f"Human detected: {img_name}"
+        current_time = time.monotonic()
+        phone = self.config_data['phone']
+        if platform == "android" and current_time - self.last_sms_time >= freq and phone[0:5] != '00000':
             # currently sending only for two times per session, will change it to some time basis interval
-            SmsManager = autoclass('android.telephony.SmsManager')
-            sms_manager = SmsManager.getDefault()
-            msg = f"Human detected: {img_path}"
-            phone = self.config_data['phone']
             try:
+                SmsManager = autoclass('android.telephony.SmsManager')
+                sms_manager = SmsManager.getDefault()
                 sms_manager.sendTextMessage(phone, None, msg, None, None)
-                print(f"✅ SMS sent to {phone}")
-                self.show_toast_msg(f"✅ SMS sent to {phone}")
-                self.sms_send_count += 1
+                Clock.schedule_once(lambda dt: self.show_toast_msg(f"MS sent to {phone}"))
+                self.sms_send_count = self.sms_send_count + 1
             except Exception as e:
                 print("SMS ❌ Failed:", e)
-                self.show_toast_msg(f"sms failed: {e}", is_error=True)
-        else:
-            print("This works only on Android!")
+                Clock.schedule_once(lambda dt: self.show_toast_msg(f"sms failed: {e}", is_error=True)) # can be removed once tested
+            self.last_sms_time = current_time
+        Clock.schedule_once(lambda dt: self.result_updater(f"{msg}"))
 
     def sms_loop(self):
         """
-        This method runs a controlable contineous loop thread, it detects if there is human
+        This runs a background loop to send sms & update the result.
+        This will be stopped when `self.process` is `False`
         """
         while self.process:
             detect_flag = False
@@ -370,7 +386,9 @@ class AiCctvApp(MDApp):
 
     def detection_loop(self):
         """
-        This method runs a controlable contineous loop thread, it detects if there is human
+        This runs a background loop to detect human from given fram (cv2 image) and puts the result into output dir.
+        This also triggers the sms via `sms queue` by putting a `message`.
+        This will be stopped when `self.process` is `False`
         """
         detect_count = 0
         while self.process:
@@ -439,6 +457,9 @@ class AiCctvApp(MDApp):
                 print(f"Detect Queue error: {e}")
 
     def start_detect_session(self):
+        """
+        This starts the `onnxruntime` session with the given `model`
+        """
         try:
             self.sess = InferenceSession(self.detect_model_path)
             # Get input and output names
@@ -451,6 +472,10 @@ class AiCctvApp(MDApp):
             return False
 
     def capture_n_onnx_detect(self):
+        """
+        This starts the `detection` & `sms` loop in separate `Thread` to avoid the UI blocking.
+        Thriggered by the `Start` button from UI.
+        """
         if self.process:
             self.show_toast_msg("Capture session is already started!")
             return
@@ -474,44 +499,20 @@ class AiCctvApp(MDApp):
     def stop_cctv_loop(self):
         self.process = False
 
-    def onnx_detect_callback(self, onnx_resp):
-        status = onnx_resp["status"]
-        message = onnx_resp["message"]
-        caller = onnx_resp["caller"]
-        self.is_detect_running = False
-        result_box = self.root.ids.cam_detect_box.ids.cam_result_image
-        if status is True:
-            self.show_toast_msg(f"Output generated at: {message}")
-            self.op_img_path = message
-            result_box.clear_widgets()
-            fitImage = Image(
-                source = message,
-                fit_mode = "contain"
-            )
-            result_box.add_widget(fitImage)
-            down_btn = MDFloatingActionButton(
-                icon="download",
-                type="small",
-                theme_icon_color="Custom",
-                md_bg_color='#e9dff7',
-                icon_color='#211c29',
-            )
-            down_btn.bind(on_release=self.open_op_file_manager)
-            result_box.add_widget(down_btn)
-        else:
-            self.show_toast_msg(message, is_error=True)
-
     ## Settings section
     def change_sms_number(self):
         self.root.ids.screen_manager.current = "initScreen"
 
-    def save_config(self, instance, input_widget):
-        phone_num = input_widget.text.strip()
+    def save_config(self, instance, phone_num_wid, sms_freq_wid):
+        phone_num = phone_num_wid.text.strip()
+        sms_freq = sms_freq_wid.text.strip()
         if len(phone_num) <= 4:
             self.show_toast_msg("Phone number should be 5 digits or more!", is_error=True)
             self.change_sms_number()
             return
-        self.config_data = {'phone': phone_num}
+        self.config_data['phone'] = phone_num
+        if len(sms_freq) >= 1:
+            self.config_data['freq'] = int(sms_freq)
         with open(self.config_path, 'w') as f:
             json.dump(self.config_data, f, indent=4)
         self.root.ids.screen_manager.current = "camObjDetect"
