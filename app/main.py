@@ -77,6 +77,7 @@ class AiCctvApp(MDApp):
         self.last_sms_time = 0
         self.config_data = {'phone': 'na', 'freq': 10}
         self.wake_lock = None
+        self.sms_permission = False
         self.img_queue = queue.Queue()
         self.sms_queue = queue.Queue()
 
@@ -88,7 +89,7 @@ class AiCctvApp(MDApp):
     def on_start(self):
         # paths setup
         if platform == "android":
-            from android.permissions import request_permissions, Permission
+            from android.permissions import check_permission, request_permissions, Permission
             sdk_version = 28
             try:
                 VERSION = autoclass('android.os.Build$VERSION')
@@ -102,6 +103,10 @@ class AiCctvApp(MDApp):
             else:  # Android 9–12
                 permissions.extend([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
             request_permissions(permissions)
+            try:
+                self.sms_permission = check_permission(Permission.SEND_SMS)
+            except Exception as e:
+                print(f"Error while checking sms permission: {e}")
             # paths on android
             context = autoclass('org.kivy.android.PythonActivity').mActivity
             android_path = context.getExternalFilesDir(None).getAbsolutePath()
@@ -376,7 +381,7 @@ class AiCctvApp(MDApp):
         msg = f"Human detected: {img_name}"
         current_time = time.monotonic()
         phone = self.config_data['phone']
-        if platform == "android" and current_time - self.last_sms_time >= freq and phone[0:5] != '00000':
+        if platform == "android" and current_time - self.last_sms_time >= freq and phone[0:5] != '00000' and self.sms_permission:
             # try to send sms as per given interval min (minimum 1min)
             try:
                 SmsManager = autoclass('android.telephony.SmsManager')
