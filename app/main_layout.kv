@@ -1,0 +1,87 @@
+# main_layout.kv
+## import local components
+#:import CamObjDetBox screens.cam_obj_detect.CamObjDetBox
+#:import SettingsBox screens.setting.SettingsBox
+
+<DrawerClickableItem@MDNavigationDrawerItem>
+    focus_color: "#e7e4c0"
+    text_color: "#4a4939"
+    icon_color: "#4a4939"
+    ripple_color: "#c5bdd2"
+    selected_color: "#0c6c4d"
+
+<DrawerLabelItem@MDNavigationDrawerItem>
+    text_color: "#4a4939"
+    icon_color: "#4a4939"
+    focus_behavior: False
+    selected_color: "#4a4939"
+    _no_ripple_effect: True
+
+<ContentNavigationDrawer>
+
+    MDNavigationDrawerHeader:
+        title: "App Menu"
+        title_color: "#4a4939"
+        spacing: "4dp"
+        padding: "12dp", 0, 0, "56dp"
+
+    MDNavigationDrawerLabel:
+        text: "Select Operation"
+
+    DrawerClickableItem:
+        icon: "camera"
+        text: "Start CCTV"
+        on_press:
+            root.nav_drawer.set_state("close")
+            root.screen_manager.current = "camObjDetect"
+
+    DrawerClickableItem:
+        icon: "wrench"
+        text: "Settings & Help"
+        on_press:
+            root.nav_drawer.set_state("close")
+            root.screen_manager.current = "settings"
+
+
+MDScreen:
+
+    MDBoxLayout: # main container
+        orientation: 'vertical'
+        spacing: dp(4)
+
+        MDTopAppBar:
+            pos_hint: {"top": 1}
+            elevation: 4
+            title: "AI CCTV"
+            left_action_items: [["menu", lambda x: nav_drawer.set_state("open")]]
+            md_bg_color: '#7643a8'
+
+        MDNavigationLayout:
+
+            MDScreenManager:
+                id: screen_manager
+
+                MDScreen:
+                    name: "initScreen"
+                    ConfigInput:
+                        id: init_screen
+
+                MDScreen:
+                    name: "camObjDetect"
+                    on_enter: app.on_cam_obj_detect()
+                    on_leave: app.on_cam_obj_dt_leave()
+                    CamObjDetBox:
+                        id: cam_detect_box
+
+                MDScreen:
+                    name: "settings"
+                    SettingsBox:
+                        id: settings_box
+
+            MDNavigationDrawer:
+                id: nav_drawer
+                radius: (0, 16, 16, 0)
+
+                ContentNavigationDrawer:
+                    screen_manager: screen_manager
+                    nav_drawer: nav_drawer
