@@ -23,7 +23,7 @@ from kivy.uix.camera import Camera
 from kivy.clock import Clock
 
 if platform == "android":
-    from jnius import autoclass
+    from jnius import autoclass, cast
 
 from kivymd.app import MDApp
 from kivymd.uix.navigationdrawer import MDNavigationDrawerMenu
@@ -76,6 +76,7 @@ class AiCctvApp(MDApp):
         self.sms_send_count = 0
         self.last_sms_time = 0
         self.config_data = {'phone': 'na', 'freq': 10}
+        self.wake_lock = None
         self.img_queue = queue.Queue()
         self.sms_queue = queue.Queue()
 
@@ -95,13 +96,14 @@ class AiCctvApp(MDApp):
                 print(f"Android SDK: {sdk_version}")
             except Exception as e:
                 print(f"Could not check the android SDK version: {e}")
-            permissions = [Permission.CAMERA, Permission.SEND_SMS, Permission.WAKE_LOCK]
+            permissions = [Permission.CAMERA, Permission.SEND_SMS] # Permission.WAKE_LOCK (if needed)
             if sdk_version >= 33:  # Android 13+
                 permissions.append(Permission.READ_MEDIA_IMAGES)
             else:  # Android 9–12
                 permissions.extend([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
             request_permissions(permissions)
             context = autoclass('org.kivy.android.PythonActivity').mActivity
+            context.getWindow().addFlags(0x08000000) # keeps screen ON
             android_path = context.getExternalFilesDir(None).getAbsolutePath()
             self.model_dir = os.path.join(android_path, 'model_files')
             self.op_dir = os.path.join(android_path, 'outputs')
@@ -133,6 +135,27 @@ class AiCctvApp(MDApp):
                 self.root.ids.screen_manager.current = "camObjDetect"
         self.result_txt = self.root.ids.cam_detect_box.ids.result_text
         print("Initialisation is successfull")
+
+    def acquire_wakelock(self): # optional
+        if self.wake_lock:
+            return  # already acquired
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        Context = autoclass("android.content.Context")
+        activity = PythonActivity.mActivity
+        PowerManager = autoclass("android.os.PowerManager")
+        power_manager = cast(PowerManager, activity.getSystemService(Context.POWER_SERVICE))
+        # Create wakelock (use PowerManager.FULL_WAKE_LOCK for full wakelock)
+        self.wake_lock = power_manager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "MyApp::WakeLockTag"
+        )
+        self.wake_lock.acquire()
+        print("WakeLock acquired")
+
+    def release_wakelock(self): # optional
+        if self.wake_lock and self.wake_lock.isHeld():
+            self.wake_lock.release()
+            self.wake_lock = None
+            print("WakeLock released")
 
     def show_toast_msg(self, message, is_error=False):
         from kivymd.uix.snackbar import MDSnackbar
