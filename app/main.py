@@ -23,7 +23,7 @@ from kivy.uix.camera import Camera
 from kivy.clock import Clock
 
 if platform == "android":
-    from jnius import autoclass, cast
+    from jnius import autoclass, cast, PythonJavaClass, java_method
 
 from kivymd.app import MDApp
 from kivymd.uix.navigationdrawer import MDNavigationDrawerMenu
@@ -102,8 +102,8 @@ class AiCctvApp(MDApp):
             else:  # Android 9–12
                 permissions.extend([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
             request_permissions(permissions)
+            # paths on android
             context = autoclass('org.kivy.android.PythonActivity').mActivity
-            context.getWindow().addFlags(0x08000000) # keeps screen ON
             android_path = context.getExternalFilesDir(None).getAbsolutePath()
             self.model_dir = os.path.join(android_path, 'model_files')
             self.op_dir = os.path.join(android_path, 'outputs')
@@ -135,6 +135,29 @@ class AiCctvApp(MDApp):
                 self.root.ids.screen_manager.current = "camObjDetect"
         self.result_txt = self.root.ids.cam_detect_box.ids.result_text
         print("Initialisation is successfull")
+
+    def set_keep_screen_on(self):
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = PythonActivity.mActivity
+        class Runnable(PythonJavaClass):
+            __javainterfaces__ = ['java/lang/Runnable']
+            __javacontext__ = 'app'
+            @java_method('()V')
+            def run(self):
+                # FLAG_KEEP_SCREEN_ON
+                activity.getWindow().addFlags(0x08000000)
+        activity.runOnUiThread(Runnable())
+
+    def clear_keep_screen_on(self):
+        PythonActivity = autoclass("org.kivy.android.PythonActivity")
+        activity = PythonActivity.mActivity
+        class Runnable(PythonJavaClass):
+            __javainterfaces__ = ['java/lang/Runnable']
+            __javacontext__ = 'app'
+            @java_method('()V')
+            def run(self):
+                activity.getWindow().clearFlags(0x08000000)
+        activity.runOnUiThread(Runnable())
 
     def acquire_wakelock(self): # optional
         if self.wake_lock:
@@ -513,6 +536,11 @@ class AiCctvApp(MDApp):
             self.popup_detect_model()
             return
         start_process = self.start_detect_session()
+        if platform == "android":
+            try:
+                self.set_keep_screen_on()
+            except Exception as e:
+                self.show_toast_msg(f"Screen on setup error: {e}", is_error=True)
         # thread
         if start_process and not self.process:
             self.process = True
@@ -614,6 +642,11 @@ class AiCctvApp(MDApp):
         except Exception as e:
             print(f"Cam stop error: {e}")
         self.camera = False
+        if platform == "android":
+            try:
+                self.clear_keep_screen_on()
+            except Exception as e:
+                self.show_toast_msg(f"Screen on setup error: {e}", is_error=True)
 
 if __name__ == '__main__':
     AiCctvApp().run()
