@@ -377,7 +377,7 @@ class AiCctvApp(MDApp):
         current_time = time.monotonic()
         phone = self.config_data['phone']
         if platform == "android" and current_time - self.last_sms_time >= freq and phone[0:5] != '00000':
-            # currently sending only for two times per session, will change it to some time basis interval
+            # try to send sms as per given interval min (minimum 1min)
             try:
                 SmsManager = autoclass('android.telephony.SmsManager')
                 sms_manager = SmsManager.getDefault()
@@ -386,7 +386,7 @@ class AiCctvApp(MDApp):
                 self.sms_send_count = self.sms_send_count + 1
             except Exception as e:
                 print("SMS ❌ Failed:", e)
-                Clock.schedule_once(lambda dt: self.show_toast_msg(f"sms failed: {e}", is_error=True)) # can be removed once tested
+                Clock.schedule_once(lambda dt: self.show_toast_msg("sms failed!", is_error=True)) # can be removed once tested
             self.last_sms_time = current_time
         Clock.schedule_once(lambda dt: self.result_updater(f"{msg}"))
 
