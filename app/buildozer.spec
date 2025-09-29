@@ -97,8 +97,8 @@ fullscreen = 0
 # (list) Permissions
 # (See https://developer.android.com/reference/android/Manifest.permission for all the supported syntaxes and properties)
 #android.permissions = android.permission.INTERNET, (name=android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=18)
-android.permissions = android.permission.SEND_SMS, android.permission.READ_MEDIA_IMAGES, android.permission.INTERNET, android.permission.CAMERA, (name=android.permission.READ_EXTERNAL_STORAGE;maxSdkVersion=32), (name=android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=32)
-# android.permission.WAKE_LOCK (if needed)
+android.permissions = android.permission.SEND_SMS, android.permission.WAKE_LOCK, android.permission.READ_MEDIA_IMAGES, android.permission.INTERNET, android.permission.CAMERA, (name=android.permission.READ_EXTERNAL_STORAGE;maxSdkVersion=32), (name=android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=32)
+#  (if needed)
 
 # (list) features (adds uses-feature -tags to manifest)
 #android.features = android.hardware.usb.host

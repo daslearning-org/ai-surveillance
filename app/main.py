@@ -96,7 +96,7 @@ class AiCctvApp(MDApp):
                 print(f"Android SDK: {sdk_version}")
             except Exception as e:
                 print(f"Could not check the android SDK version: {e}")
-            permissions = [Permission.CAMERA, Permission.SEND_SMS] # Permission.WAKE_LOCK (if needed)
+            permissions = [Permission.CAMERA, Permission.SEND_SMS, Permission.WAKE_LOCK] # Permission.WAKE_LOCK (if needed)
             if sdk_version >= 33:  # Android 13+
                 permissions.append(Permission.READ_MEDIA_IMAGES)
             else:  # Android 9–12
@@ -136,30 +136,7 @@ class AiCctvApp(MDApp):
         self.result_txt = self.root.ids.cam_detect_box.ids.result_text
         print("Initialisation is successfull")
 
-    def set_keep_screen_on(self):
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        activity = PythonActivity.mActivity
-        class Runnable(PythonJavaClass):
-            __javainterfaces__ = ['java/lang/Runnable']
-            __javacontext__ = 'app'
-            @java_method('()V')
-            def run(self):
-                # FLAG_KEEP_SCREEN_ON
-                activity.getWindow().addFlags(0x08000000)
-        activity.runOnUiThread(Runnable())
-
-    def clear_keep_screen_on(self):
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        activity = PythonActivity.mActivity
-        class Runnable(PythonJavaClass):
-            __javainterfaces__ = ['java/lang/Runnable']
-            __javacontext__ = 'app'
-            @java_method('()V')
-            def run(self):
-                activity.getWindow().clearFlags(0x08000000)
-        activity.runOnUiThread(Runnable())
-
-    def acquire_wakelock(self): # optional
+    def acquire_wakelock(self):
         if self.wake_lock:
             return  # already acquired
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
@@ -169,12 +146,12 @@ class AiCctvApp(MDApp):
         power_manager = cast(PowerManager, activity.getSystemService(Context.POWER_SERVICE))
         # Create wakelock (use PowerManager.FULL_WAKE_LOCK for full wakelock)
         self.wake_lock = power_manager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK, "MyApp::WakeLockTag"
+            PowerManager.FULL_WAKE_LOCK, "MyApp::WakeLockTag"
         )
         self.wake_lock.acquire()
         print("WakeLock acquired")
 
-    def release_wakelock(self): # optional
+    def release_wakelock(self):
         if self.wake_lock and self.wake_lock.isHeld():
             self.wake_lock.release()
             self.wake_lock = None
@@ -538,7 +515,7 @@ class AiCctvApp(MDApp):
         start_process = self.start_detect_session()
         if platform == "android":
             try:
-                self.set_keep_screen_on()
+                self.acquire_wakelock()
             except Exception as e:
                 self.show_toast_msg(f"Screen on setup error: {e}", is_error=True)
         # thread
@@ -644,7 +621,7 @@ class AiCctvApp(MDApp):
         self.camera = False
         if platform == "android":
             try:
-                self.clear_keep_screen_on()
+                self.release_wakelock()
             except Exception as e:
                 self.show_toast_msg(f"Screen on setup error: {e}", is_error=True)
 
