@@ -53,7 +53,7 @@ Builder.load_string('''
                 MDList:
                     OneLineIconListItem:
                         text: "Demo (How to use)"
-                        on_release: app.open_link(self, "https://youtube.com/watch?v=wUABgn4JYc4")
+                        on_release: app.open_link(self, "https://youtube.com/watch?v=Sbc2sClECdk")
                         IconLeftWidget:
                             icon: "youtube"
                     OneLineIconListItem:
@@ -71,6 +71,11 @@ Builder.load_string('''
                         on_release: app.update_checker(self)
                         IconLeftWidget:
                             icon: "github"
+                    OneLineIconListItem:
+                        text: "Try our other Apps"
+                        on_release: app.open_link(self, "https://daslearning.in/apps/")
+                        IconLeftWidget:
+                            icon: "google-play"
 
 ''')
 
