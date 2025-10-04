@@ -41,7 +41,7 @@ from screens.setting import SettingsBox
 from screens.init_screen import ConfigInput
 
 ## Global definitions
-__version__ = "0.0.1" # The APP version
+__version__ = "0.0.2" # The APP version
 
 detect_model_url = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/ssd-mobilenetv1/model/ssd_mobilenet_v1_10.onnx"
 # Determine the base path for your application's resources
