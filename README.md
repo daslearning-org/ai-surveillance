@@ -13,7 +13,8 @@ This cross-platform, offline app uses `OnnxRuntime` (Machine Learning) to detect
 4. No `trackers`, no `data collection` etc. Actually you own your data & your app.
 
 ## 📽️ Demo
-Coming soon...
+You can click on the below Image or this [Youtube Link](https://www.youtube.com/watch?v=Sbc2sClECdk) to see the demo. Please let me know in the comments, how do you feel about this App. <br>
+[![AI-CCTV](./docs/images/thumb.png)](https://www.youtube.com/watch?v=Sbc2sClECdk)
 
 ## 🖧 Our Scematic Architecture
 To be added...
