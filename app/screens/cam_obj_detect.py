@@ -64,10 +64,10 @@ Builder.load_string('''
             id: btn_downlaod
             text: "Downlaod Captured Images"
             icon: "download"
-            font_size: sp(16)
+            font_size: sp(14)
             md_bg_color: '#1c4545'
             pos_hint: {"center_x": .5, "center_y": .5}
-            size_hint_x: 0.5
+            size_hint_x: 0.8
             on_release: app.open_op_file_manager()
 
 ''')
