@@ -41,7 +41,7 @@ from screens.setting import SettingsBox
 from screens.init_screen import ConfigInput
 
 ## Global definitions
-__version__ = "0.0.2" # The APP version
+__version__ = "0.1.0" # The APP version
 
 detect_model_url = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/ssd-mobilenetv1/model/ssd_mobilenet_v1_10.onnx"
 # Determine the base path for your application's resources
@@ -131,6 +131,14 @@ class AiCctvApp(MDApp):
         self.config_path = os.path.join(config_dir, 'config.json')
         self.detect_model_path = os.path.join(self.model_dir, "ssd_mobilenet_v1_10.onnx")
         Window.keep_screen_on = True
+
+        #file managers
+        self.is_op_file_mgr_open = False
+        self.op_file_manager = MDFileManager(
+            exit_manager=self.op_file_exit_manager,
+            select_path=self.select_op_path,
+            selector="folder",  # Restrict to selecting directories only
+        )
 
         # check if config exists with a valid phone number
         if os.path.exists(self.config_path):
@@ -267,6 +275,42 @@ class AiCctvApp(MDApp):
             self.result_txt.text = f"Downloading: {percentage:.1f}%"
         else:
             self.result_txt.text = f"Downloading: {downloaded} bytes"
+
+    def open_op_file_manager(self):
+        """Open the file manager to select destination folder. On android use Downloads or Pictures folders only"""
+        try:
+            self.op_file_manager.show(self.external_storage)
+            self.is_op_file_mgr_open = True
+        except Exception as e:
+            self.show_toast_msg(f"Error: {e}", is_error=True)
+
+    def op_file_exit_manager(self, *args):
+        """Called when the user reaches the root of the directory tree."""
+        self.is_op_file_mgr_open = False
+        self.op_file_manager.close()
+
+    def select_op_path(self, path: str):
+        """
+        Called when a directory is selected. Save the Output file.
+        """
+        Thread(target=self.download_captured_files, args=(path,), daemon=True).start()
+        self.op_file_exit_manager()
+        self.show_toast_msg("Started downloading in background...")
+
+    def download_captured_files(self, path: str):
+        import shutil
+        op_img_count = 0
+        for filename in os.listdir(self.op_dir):
+            if filename.endswith(".jpg") or filename.endswith(".jpeg") or filename.endswith(".png"):
+                dest_path = os.path.join(path, filename)
+                src_path = os.path.join(self.op_dir, filename)
+                try:
+                    shutil.copyfile(src_path, dest_path)
+                    os.remove(src_path)
+                    op_img_count += 1
+                except Exception as e:
+                    print(f"Error while copying: {e}")
+        Clock.schedule_once(lambda dt: self.show_toast_msg(f"Downloaded {op_img_count} files"))
 
     def on_cam_obj_detect(self):
         """
@@ -528,9 +572,11 @@ class AiCctvApp(MDApp):
             self.process = True
             Thread(target=self.detection_loop, daemon=True).start()
             Thread(target=self.sms_loop, daemon=True).start()
+            self.result_txt.text = "AI Dectection started..."
 
     def stop_cctv_loop(self):
         self.process = False
+        self.result_txt.text = "AI Dectection stopped!"
 
     ## Settings section
     def change_sms_number(self):

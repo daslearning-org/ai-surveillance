@@ -113,7 +113,8 @@ android.minapi = 28
 #android.sdk = 20
 
 # (str) Android NDK version to use
-android.ndk = 25b
+android.ndk = 28c
+#25b
 
 # This sets Gradle's maximum JVM heap size to 2048 megabytes (2GB).
 #android.gradle_properties = org.gradle.jvmargs=-Xmx2048m
@@ -327,7 +328,8 @@ p4a.url = https://github.com/daslearning-org/p4a-unofficial.git
 #p4a.fork = kivy
 
 # (str) python-for-android branch to use, defaults to master
-p4a.branch = v0.0.2
+p4a.branch = numpy2
+#v0.0.2
 
 # ... other configurations
 #pip.trusted_hosts = pypi.org files.pythonhosted.org
