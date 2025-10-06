@@ -33,7 +33,7 @@ Builder.load_string('''
             icon: "camera"
             font_size: sp(18)
             md_bg_color: 'orange'
-            pos_hint: {"center_x": .5, "center_y": .5}
+            #pos_hint: {"center_x": .5, "center_y": .5}
             size_hint_x: 0.7
             on_release: app.capture_n_onnx_detect()
 
@@ -43,19 +43,32 @@ Builder.load_string('''
             icon: "stop"
             font_size: sp(18)
             md_bg_color: '#333036'
-            pos_hint: {"center_x": .5, "center_y": .5}
+            #pos_hint: {"center_x": .5, "center_y": .5}
             size_hint_x: 0.3
             on_release: app.stop_cctv_loop()
 
     BoxLayout:
         size_hint_y: 0.5
         id: cam_result_box
+        orientation: 'vertical'
+        spacing: dp(4)
+        padding: dp(4)
+
         MDLabel:
             id: result_text
             halign: "center"
             markup: True
             text: "You can start the CCTV"
 
+        MDFillRoundFlatIconButton:
+            id: btn_downlaod
+            text: "Downlaod Captured Images"
+            icon: "download"
+            font_size: sp(14)
+            md_bg_color: '#1c4545'
+            pos_hint: {"center_x": .5, "center_y": .5}
+            size_hint_x: 0.8
+            on_release: app.open_op_file_manager()
 
 ''')
 

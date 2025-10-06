@@ -41,7 +41,7 @@ from screens.setting import SettingsBox
 from screens.init_screen import ConfigInput
 
 ## Global definitions
-__version__ = "0.0.2" # The APP version
+__version__ = "1.0.0" # The APP version
 
 detect_model_url = "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation/ssd-mobilenetv1/model/ssd_mobilenet_v1_10.onnx"
 # Determine the base path for your application's resources
@@ -132,6 +132,14 @@ class AiCctvApp(MDApp):
         self.detect_model_path = os.path.join(self.model_dir, "ssd_mobilenet_v1_10.onnx")
         Window.keep_screen_on = True
 
+        #file managers
+        self.is_op_file_mgr_open = False
+        self.op_file_manager = MDFileManager(
+            exit_manager=self.op_file_exit_manager,
+            select_path=self.select_op_path,
+            selector="folder",  # Restrict to selecting directories only
+        )
+
         # check if config exists with a valid phone number
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
@@ -162,7 +170,7 @@ class AiCctvApp(MDApp):
             self.wake_lock = None
             print("WakeLock released")
 
-    def show_toast_msg(self, message, is_error=False):
+    def show_toast_msg(self, message, is_error=False, duration=3):
         from kivymd.uix.snackbar import MDSnackbar
         bg_color = (0.2, 0.6, 0.2, 1) if not is_error else (0.8, 0.2, 0.2, 1)
         MDSnackbar(
@@ -173,7 +181,7 @@ class AiCctvApp(MDApp):
             md_bg_color=bg_color,
             y=dp(24),
             pos_hint={"center_x": 0.5},
-            duration=3
+            duration=duration
         ).open()
 
     def show_text_dialog(self, title, text="", buttons=[]):
@@ -267,6 +275,42 @@ class AiCctvApp(MDApp):
             self.result_txt.text = f"Downloading: {percentage:.1f}%"
         else:
             self.result_txt.text = f"Downloading: {downloaded} bytes"
+
+    def open_op_file_manager(self):
+        """Open the file manager to select destination folder. On android use Downloads or Pictures folders only"""
+        try:
+            self.op_file_manager.show(self.external_storage)
+            self.is_op_file_mgr_open = True
+        except Exception as e:
+            self.show_toast_msg(f"Error: {e}", is_error=True)
+
+    def op_file_exit_manager(self, *args):
+        """Called when the user reaches the root of the directory tree."""
+        self.is_op_file_mgr_open = False
+        self.op_file_manager.close()
+
+    def select_op_path(self, path: str):
+        """
+        Called when a directory is selected. Save the Output file.
+        """
+        Thread(target=self.download_captured_files, args=(path,), daemon=True).start()
+        self.op_file_exit_manager()
+        self.show_toast_msg("Started downloading in background...", duration=2)
+
+    def download_captured_files(self, path: str):
+        import shutil
+        op_img_count = 0
+        for filename in os.listdir(self.op_dir):
+            if filename.endswith(".jpg") or filename.endswith(".jpeg") or filename.endswith(".png"):
+                dest_path = os.path.join(path, filename)
+                src_path = os.path.join(self.op_dir, filename)
+                try:
+                    shutil.copyfile(src_path, dest_path)
+                    os.remove(src_path)
+                    op_img_count += 1
+                except Exception as e:
+                    print(f"Error while copying: {e}")
+        Clock.schedule_once(lambda dt: self.show_toast_msg(f"Downloaded {op_img_count} files"))
 
     def on_cam_obj_detect(self):
         """
@@ -424,7 +468,7 @@ class AiCctvApp(MDApp):
             now = datetime.datetime.now()
             current_time = str(now.strftime("%H%M%S"))
             current_date = str(now.strftime("%Y%m%d"))
-            image_filename = f"cam-{current_date}-{current_time}.png"
+            image_filename = f"cam-{current_date}-{current_time}.jpg"
             op_img_path = os.path.join(self.op_dir, image_filename)
             # do the detection
             try:
@@ -471,7 +515,7 @@ class AiCctvApp(MDApp):
                         if detect_flag:
                             detect_count += 1
                         if detect_count >= 5:
-                            # if detection happens for atleast 5 framse i.e. 1/2 sec
+                            # if detection happens for atleast 5 framse i.e. 1 sec
                             cv2.imwrite(op_img_path, output_img)
                             self.sms_queue.put(op_img_path)
                             detect_count = 0
@@ -528,9 +572,11 @@ class AiCctvApp(MDApp):
             self.process = True
             Thread(target=self.detection_loop, daemon=True).start()
             Thread(target=self.sms_loop, daemon=True).start()
+            self.result_txt.text = "AI Dectection started..."
 
     def stop_cctv_loop(self):
         self.process = False
+        self.result_txt.text = "AI Dectection stopped!"
 
     ## Settings section
     def change_sms_number(self):

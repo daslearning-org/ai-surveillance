@@ -30,7 +30,7 @@ Builder.load_string('''
             helper_text: "ex: +919876543210"
             helper_text_mode: "persistent"
             size_hint_x: 0.8
-            font_size: sp(18)
+            font_size: sp(14)
             multiline: False
             required: True
     MDGridLayout:
@@ -39,7 +39,7 @@ Builder.load_string('''
         MDLabel:
             text: "SMS frequency (min)"
             halign: "left"
-            font_size: sp(18)
+            font_size: sp(14)
             size_hint_x: 0.2
         MDTextField:
             id: sms_freq_input
