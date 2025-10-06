@@ -170,7 +170,7 @@ class AiCctvApp(MDApp):
             self.wake_lock = None
             print("WakeLock released")
 
-    def show_toast_msg(self, message, is_error=False):
+    def show_toast_msg(self, message, is_error=False, duration=3):
         from kivymd.uix.snackbar import MDSnackbar
         bg_color = (0.2, 0.6, 0.2, 1) if not is_error else (0.8, 0.2, 0.2, 1)
         MDSnackbar(
@@ -181,7 +181,7 @@ class AiCctvApp(MDApp):
             md_bg_color=bg_color,
             y=dp(24),
             pos_hint={"center_x": 0.5},
-            duration=3
+            duration=duration
         ).open()
 
     def show_text_dialog(self, title, text="", buttons=[]):
@@ -295,7 +295,7 @@ class AiCctvApp(MDApp):
         """
         Thread(target=self.download_captured_files, args=(path,), daemon=True).start()
         self.op_file_exit_manager()
-        self.show_toast_msg("Started downloading in background...")
+        self.show_toast_msg("Started downloading in background...", duration=2)
 
     def download_captured_files(self, path: str):
         import shutil
@@ -468,7 +468,7 @@ class AiCctvApp(MDApp):
             now = datetime.datetime.now()
             current_time = str(now.strftime("%H%M%S"))
             current_date = str(now.strftime("%Y%m%d"))
-            image_filename = f"cam-{current_date}-{current_time}.png"
+            image_filename = f"cam-{current_date}-{current_time}.jpg"
             op_img_path = os.path.join(self.op_dir, image_filename)
             # do the detection
             try:
@@ -515,7 +515,7 @@ class AiCctvApp(MDApp):
                         if detect_flag:
                             detect_count += 1
                         if detect_count >= 5:
-                            # if detection happens for atleast 5 framse i.e. 1/2 sec
+                            # if detection happens for atleast 5 framse i.e. 1 sec
                             cv2.imwrite(op_img_path, output_img)
                             self.sms_queue.put(op_img_path)
                             detect_count = 0

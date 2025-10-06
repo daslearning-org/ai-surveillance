@@ -94,7 +94,7 @@ class OnnxDetect():
         now = datetime.datetime.now()
         current_time = str(now.strftime("%H%M%S"))
         current_date = str(now.strftime("%Y%m%d"))
-        image_filename = f"cam-{current_date}-{current_time}.png"
+        image_filename = f"cam-{current_date}-{current_time}.jpg"
         op_img_path = os.path.join(self.save_dir, f"op-{image_filename}")
 
         if img is None:
